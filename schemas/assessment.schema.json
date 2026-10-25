@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://causent.local/schemas/assessment.schema.json",
+  "title": "CausentAssessmentReport",
+  "type": "object",
+  "required": [
+    "case_id",
+    "assessment_id",
+    "canonical_schema_version",
+    "rule_set_version",
+    "assurance_outcome",
+    "localization_status",
+    "report_digest"
+  ],
+  "properties": {
+    "case_id": { "type": "string" },
+    "assessment_id": { "type": "string" },
+    "canonical_schema_version": { "type": "string" },
+    "rule_set_version": { "type": "string" },
+    "assurance_outcome": { "type": "string" },
+    "localization_status": { "type": "string" },
+    "report_digest": { "type": "string" },
+    "rule_results": { "type": "array" },
+    "confirmed_violations": { "type": "array" },
+    "unresolved_proof_obligations": { "type": "array" },
+    "drunix_transaction_references": { "type": "array" }
+  },
+  "additionalProperties": true
+}

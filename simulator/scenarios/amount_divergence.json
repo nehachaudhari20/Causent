@@ -1,0 +1,6 @@
+{
+  "scenario_id": "excess_amount",
+  "description": "Verified ceiling 950000 minor INR vs settlement 1200000",
+  "expected_assurance_outcome": "DIVERGENCE_CONFIRMED",
+  "events": []
+}

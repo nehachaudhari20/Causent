@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+causent.egg-info/
+.venv/
+venv/
+.env
+.env.local
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Go / chaincode
+drunix/chaincode/**/vendor/
+*.exe
+*.test
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Data & secrets
+*.pem
+*.key
+wallet/
+connection-*.json
+configs/local.env
+
+# Storage
+data/
+uploads/
+*.db
+
+# OS
+Thumbs.db
+.DS_Store

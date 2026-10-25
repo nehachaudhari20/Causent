@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://causent.local/schemas/canonical_event.schema.json",
+  "title": "CausentCanonicalEvent",
+  "type": "object",
+  "required": ["schema_version", "event_id", "event_type", "issuer", "source", "time"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "event_id": { "type": "string" },
+    "case_id": { "type": ["string", "null"] },
+    "event_type": { "type": "string" },
+    "issuer": {
+      "type": "object",
+      "required": ["organization_id", "key_id"],
+      "properties": {
+        "organization_id": { "type": "string" },
+        "key_id": { "type": "string" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["system_id", "protocol", "native_event_id"],
+      "properties": {
+        "system_id": { "type": "string" },
+        "protocol": { "type": "string" },
+        "native_event_id": { "type": "string" },
+        "native_reference": { "type": ["string", "null"] }
+      }
+    },
+    "time": {
+      "type": "object",
+      "required": ["occurred_at", "observed_at"],
+      "properties": {
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "observed_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "references": { "type": "object" },
+    "relations": { "type": "array" },
+    "facts": { "type": "object" },
+    "evidence": { "type": "object" }
+  },
+  "additionalProperties": false
+}

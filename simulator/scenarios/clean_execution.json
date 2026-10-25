@@ -1,0 +1,6 @@
+{
+  "scenario_id": "clean_three_hop",
+  "description": "Consistent authority, payment, and service evidence",
+  "expected_assurance_outcome": "CONSISTENT_WITH_EVIDENCE",
+  "events": []
+}

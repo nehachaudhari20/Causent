@@ -1,0 +1,6 @@
+{
+  "scenario_id": "ambiguous_correlation",
+  "description": "Similar amount and time without trustworthy binding",
+  "expected_assurance_outcome": "INSUFFICIENT_EVIDENCE",
+  "events": []
+}

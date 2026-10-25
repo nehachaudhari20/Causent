@@ -379,6 +379,25 @@ Implementation labels: `DESIGNED` → `IMPLEMENTED` → `TESTED` → `BENCHMARKE
 
 ---
 
+## Local development
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest tests -q
+python -m api.main   # or: uvicorn api.main:app --reload --port 8080
+```
+
+Drunix chaincode (requires Go 1.22+):
+
+```bash
+cd drunix/chaincode/causent-assurance
+go build .
+```
+
+With `DRUNIX_GATEWAY_ENABLED=false` (default), the API uses stub ledger responses so you can develop without a live network. See [drunix/README.md](drunix/README.md).
+
+---
+
 ## Status
 
 | | |
