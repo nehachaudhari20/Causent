@@ -1,1071 +1,396 @@
-# LEDGR
-## Agentic Payment Execution Assurance
+# Causent: Beyond the Receipt — Execution Assurance for Agentic Payments
 
-Ledgr is an execution-assurance layer for UAP-style agentic payments.
+**Causent** is an execution-assurance platform for multi-step, multi-agent commerce. It connects a user’s original intent and delegated authority to observable agent actions, payment events, and service outcomes across independently operated systems.
 
-It is designed for payment executions that cross multiple independently controlled organizations, where authorization may already be established but the network still needs to answer:
+Verifying a single authorization or payment receipt does not establish whether an entire agentic execution remained consistent with the user’s intent, delegated authority, and constraints. Causent checks whether observed execution complies with explicit constraints and identifies the **earliest divergence supported by the available evidence**—and abstains when the records do not justify a stronger conclusion.
 
-- Was the execution authorized?
-- What actually happened across participants?
-- What should have happened according to the mandate and execution rules?
-- Where did the first observable divergence occur?
-- Can the resulting conclusion be supported by verifiable evidence and provenance?
-
-Ledgr reconstructs payment execution from cryptographically verifiable participant observations, derives an expected execution model from the authorized mandate and rules, verifies observed execution against that model, identifies the first observable divergence, and produces a provenance-linked **Execution Assurance Record (EAR)**.
-
-Drunix provides the shared multi-organization transactional state layer for critical execution state, execution permits, evidence commitments, and assurance commitments.
+Drunix provides the **permissioned cross-organisation governance layer**: attributable evidence commitments, challenges, corrections, and case sealing. Sensitive payloads and the assurance algorithm itself stay off-chain.
 
 ---
 
-## 1. Problem
+## Table of contents
 
-Agentic payment execution can span multiple independently controlled systems:
-
-```text
-Agent
-  |
-  v
-Payment / PSP
-  |
-  v
-Bank
-  |
-  v
-Merchant / Fulfilment
-```
-
-Each participant may maintain its own databases, logs, events, and internal records.
-
-When an execution is disputed, failed, duplicated, partially completed, or inconsistent across participants, reconstructing what actually happened becomes difficult.
-
-Ledgr addresses this execution-assurance problem by creating a verifiable execution view across participating organizations.
-
-The system separates:
-
-```text
-AUTHORIZED
-     |
-     v
-WHAT HAPPENED
-     |
-     v
-WHAT SHOULD HAVE HAPPENED
-     |
-     v
-FIRST OBSERVABLE DIVERGENCE
-     |
-     v
-EXECUTION ASSURANCE RECORD
-```
+- [Problem](#problem)
+- [What Causent is and is not](#what-causent-is-and-is-not)
+- [Core capabilities](#core-capabilities)
+- [System architecture](#system-architecture)
+- [Assurance outcomes and uncertainty](#assurance-outcomes-and-uncertainty)
+- [Example: amount divergence](#example-amount-divergence)
+- [Drunix integration](#drunix-integration)
+- [Prototype and validation](#prototype-and-validation)
+- [Repository layout](#repository-layout)
+- [Implementation roadmap](#implementation-roadmap)
+- [Documentation](#documentation)
+- [Status](#status)
 
 ---
 
-## 2. What Ledgr Does
+## Problem
 
-Ledgr operates downstream of authorization.
+Agentic commerce introduces a critical **accountability gap**. As workflows become multi-step and span multiple agents, service providers, and payment participants, execution evidence fragments across independently maintained systems. Dependencies between delegated actions, payment execution, and downstream service outcomes are hard to establish across organisational boundaries. Incorrect selections, unauthorized actions, and inconsistent outcomes can propagate through dependent services, obscuring where failures began.
 
-It assumes that identity, delegation, and payment authorization have already been established.
+Existing authorization frameworks and payment protocols provide identity, mandates, payment verification, and receipts—but those records do not inherently yield a unified, **evidence-backed reconstruction** of the full execution lifecycle. Missing events, delayed confirmations, ambiguous references, and contradictory attestations further complicate verification and dispute resolution.
 
-Its responsibility begins with the execution itself.
+The gap is the absence of a reliable, **evidence-bounded** method for cross-participant execution assurance that:
 
-Ledgr:
+- correlates independently sourced evidence,
+- verifies explicit execution constraints,
+- identifies the earliest **observable and evidence-supported** divergence,
+- produces a reproducible investigation record,
 
-1. Creates an execution context.
-2. Receives participant observations.
-3. Verifies signed attestations.
-4. Reconstructs the execution state.
-5. Derives the expected execution state from the mandate and rules.
-6. Verifies observed execution against expected execution.
-7. Identifies the first observable divergence.
-8. Commits critical execution and assurance information to Drunix.
-9. Produces a provenance-linked Execution Assurance Record.
-
----
-
-## 3. Core Questions
-
-### Was it authorized?
-
-The execution context captures the mandate, intent, agent identity, constraints, and execution binding.
-
-### What happened?
-
-Participant attestations are collected and reconstructed into an ordered execution history.
-
-### What should have happened?
-
-An expected execution model is derived from the authorized mandate, constraints, transitions, and invariants.
-
-Verification compares:
+while clearly distinguishing **confirmed violations** from **missing evidence**, **ambiguity**, and **conflicting claims**.
 
 ```text
-Observed Execution
+User intent & authority
         |
         v
-     VERIFY
-        ^
-        |
-Expected Execution
+Agent platform ---- Delegated agents ---- Service providers
+        |                    |                    |
+        +--------------------+--------------------+
+                             |
+                    Payment participant
+                             |
+        Evidence fragmented; no single system
+        holds the full execution story
+                             |
+                             v
+              Causent: correlate, constrain, localise, abstain
 ```
 
-Possible outcomes include:
-
-- `PASS`
-- `VIOLATION`
-- `NOT_OBSERVED / UNKNOWN`
-- `CONFLICTING`
+Causent **complements** existing payment and authorization controls; it does not replace them.
 
 ---
 
-## 4. Eight-Layer Architecture
+## What Causent is and is not
 
-| Layer | Responsibility | Main Output |
-|---|---|---|
-| L1 | Authorization & Execution Context | ExecutionContext |
-| L2 | Evidence & Attestation | Verified Participant Attestations |
-| L3 | Execution-State Reconstruction | ReconstructedExecution |
-| L4 | Expected-State & Policy Model | ExpectedExecutionModel |
-| L5 | Verification & Divergence | VerificationResult + D* |
-| L6 | Drunix Shared Execution | Shared State + Commitments |
-| L7 | Assurance & Evidence Output | Execution Assurance Record |
-| L8 | Security, Privacy & Scalability | Security Context + Controls |
+| In scope | Outside the core claim |
+|----------|-------------------------|
+| Correlate authenticated evidence across participants | Recover an agent’s private LLM reasoning |
+| Verify explicit authority, amount, scope, and lifecycle constraints | Replace AP2, x402, MPP, UAP, a PSP, or a payment rail |
+| Model dependencies between delegation, invocation, payment, and delivery | Decide legal liability or assign final blame |
+| Localise the earliest **evidence-supported** divergence | Guarantee discovery of the true root cause from incomplete records |
+| Represent missing, ambiguous, and contradictory evidence explicitly | Automatically reverse payments or unwind completed services |
+| Record cross-organisation assertions, challenges, corrections, and case commitments on Drunix | Claim production NPCI, UPI, bank, or PSP connectivity without authorization |
 
-### End-to-End Flow
+**Design distinctions (non-negotiable):**
+
+- A valid digital signature shows that a particular key signed a representation; it does **not** prove the underlying business claim is true.
+- A missing event is **not** proof that the event never occurred.
+- Causent establishes what the evidence **supports**; it does not treat missing records as proof of absence or infer violations from similar amounts and timestamps alone.
+
+**Positioning:** Causent is not “AI payments plus blockchain,” a trust score for agents, or a graph that automatically finds root cause. Its moat is the combination of **protocol-aware evidence adapters**, **typed execution relationships**, **uncertainty-aware localisation (EBDL)**, and **cross-organisation governance**—evaluated against strong baselines, not assumed.
+
+---
+
+## Core capabilities
+
+### 1. Canonical evidence and cross-system correlation
+
+Causent collects structured evidence from agent platforms, delegated agents, service providers, and payment participants. Each record preserves source identity, native event reference, timestamps (`occurred_at` vs `observed_at`), task/delegation/payment references, payload digest, and cryptographic verification metadata.
+
+A **correlation engine** connects records using:
+
+1. Native protocol bindings (strongest),
+2. Authenticated explicit references,
+3. Trace or execution context,
+4. Constrained candidate matching (never silently promoted to verified).
+
+Duplicate events, invalid signatures, conflicting records, and unresolved references are classified separately. Uncertain matches are never treated as verified dependencies.
+
+### 2. Execution dependency model — Multi-Layer Provenance Graph (MLPG)
+
+Causent builds an **MLPG** linking user intent, delegated authority, agent invocations, resource selection, payment authorization, settlement, service fulfilment, and downstream effects.
+
+- **Nodes:** events or execution entities.
+- **Edges:** typed relations (`delegated-by`, `authorized-by`, `invoked`, `settled-for`, `fulfilled-by`, etc.) with **evidence basis** and **verification status**.
+
+Execution order follows **supported dependencies**, not wall-clock timestamps alone—handling delayed events, concurrency, and incomplete records without inventing a sequence the evidence cannot support.
+
+### 3. Evidence-Bounded Divergence Localisation (EBDL)
+
+**EBDL** is Causent’s core assurance pipeline:
+
+1. Validate evidence (schema, signatures, issuer authority, replay/idempotency).
+2. Resolve relations conservatively.
+3. Build a partial-order execution graph; detect cycles and unresolved edges.
+4. Evaluate versioned, deterministic assurance rules against recorded intent and delegated authority (amount ceilings, permitted providers, scope, delegation boundaries, payment–fulfilment relationships).
+5. Identify **minimal confirmed violations** under the supported causal order.
+6. Assess whether localization is unique, multi-candidate, or **unresolved**.
+7. Emit a reproducible assessment (evidence digests, rule versions, relation justifications, unresolved questions).
+
+Rule evaluation per constraint: `SATISFIED` · `VIOLATED` · `UNKNOWN` · `CONFLICT`. The system does **not** upgrade `UNKNOWN` to `SATISFIED` or turn candidate links into confirmed violations.
+
+### 4. Assurance results and reproducible investigation
+
+Each assessment produces a structured outcome and an auditable report. Investigators can trace every finding to supporting evidence and reproduce the run with the same evidence set and rule versions.
+
+Challenges and corrections are **new attributable records**; prior history is not silently rewritten.
+
+### 5. Drunix-based cross-organisation governance and privacy
+
+Drunix holds **minimum on-chain governance state**: case identifiers, evidence-batch commitments, assessment digests, challenges, corrections, and sealed case versions. Encrypted payloads, credentials, personal data, and raw logs remain in off-chain storage with separate access control.
+
+A committed digest supports **integrity checking** against registered data; it does not, by itself, prove that the underlying claim is true.
+
+---
+
+## System architecture
 
 ```text
-Authorized Context
-        |
+Participant systems
+  Agent platform · Service provider · Payment adapter · Downstream consumer
+        |                    native receipts, exports, attestations
         v
-Attested Observations
-        |
++------------------------------------------------------------------+
+| 1. Evidence ingestion & verification                              |
+|    Schema · issuer identity · signatures · replay · authority     |
++------------------------------------------------------------------+
         v
-Reconstructed State
-        |
++------------------------------------------------------------------+
+| 2. Correlation & execution model                                  |
+|    Canonical envelope · typed relations · protocol adapters · MLPG|
++------------------------------------------------------------------+
         v
-Expected State
++------------------------------------------------------------------+
+| 3. Causent assurance engine (EBDL)                                |
+|    Rules · evidence-qualified relations · divergence · abstention |
++------------------------------------------------------------------+
         |
-        v
-Verification
-        |
-        v
-First Observable Divergence
-        |
-        v
-Drunix Shared Execution State
-        |
-        v
-Execution Assurance Record
+        +------------------------+---------------------------+
+        v                        v                           v
+ Off-chain evidence plane   Drunix governance plane   Investigation API
+ (encrypted objects,        (cases, commitments,         (timeline, graph,
+  graph, reports)            challenges, seals)          report export)
 ```
+
+| Component | Responsibility |
+|-----------|----------------|
+| Protocol adapters | Normalize protocol-specific evidence; preserve native references |
+| Evidence verifier | Cryptographic integrity, issuer authority, freshness, replay |
+| Correlation engine | Relations only at supported confidence/evidence levels |
+| Graph builder | Partial order, causal edges, unresolved links |
+| Assurance engine (EBDL) | Deterministic rules, localization, abstention |
+| Evidence store | Encrypted raw objects and reports off-chain |
+| Commitment service | Canonical batches, Merkle roots, digests |
+| Drunix chaincode (`causent-assurance`) | Case governance, append-only records, endorsement policies |
+| Application API | FastAPI: validation, correlation, EBDL, Drunix client integration |
+
+**Application stack (target):** Python/FastAPI for ingestion and assurance; PostgreSQL for event index and graph metadata; encrypted object storage for payloads; **Go chaincode** on Drunix for governance.
 
 ---
 
-## 5. First Observable Divergence
+## Assurance outcomes and uncertainty
 
-A central concept in Ledgr is the **first observable divergence**.
+Causent maintains **separate** assessments—not a single trust score.
 
-It is the earliest evidence-backed execution transition for which the observed execution can no longer be explained by:
+**A. Evidence status**  
+`AUTHENTICATED` · `UNVERIFIED_SOURCE` · `INVALID_EVIDENCE` · `DUPLICATE_EVENT` · `CONFLICTING_EVENT_ID`
 
-- the authorized expected-state model
-- valid execution transitions
-- applicable constraints
-- execution invariants
+**B. Relationship status**  
+`EXPLICIT_BINDING` · `AUTHENTICATED_REFERENCE` · `CANDIDATE_LINK` · `AMBIGUOUS_LINK` · `UNLINKED`
 
-Missing evidence is **not automatically treated as a divergence**.
+**C. Assurance outcome**  
+`CONSISTENT_WITH_EVIDENCE` · `DIVERGENCE_CONFIRMED` · `INSUFFICIENT_EVIDENCE` · `CONFLICTING_ATTESTATIONS` · `NOT_ASSESSABLE`
 
-For example:
+**D. Localization status**  
+`UNIQUE_EARLIEST` · `MULTIPLE_MINIMAL_CANDIDATES` · `EARLIEST_UNRESOLVED`
 
-```text
-AUTHORIZED
-     |
-     v
-REQUESTED
-     |
-     v
-ACCEPTED
-     |
-     v
-FUNDS_DEBITED
-     |
-     v
-MERCHANT_CONFIRMED
-     |
-     v
-COMPLETED
-```
-
-If merchant confirmation has not been observed, Ledgr represents that as missing or unknown evidence rather than automatically claiming that the merchant failed.
-
-If two authenticated participants provide conflicting observations, Ledgr retains the conflict instead of silently selecting one participant as the truth.
+When multiple violations cannot be reliably ordered, Causent reports **multiple possible earliest divergences**. When missing or conflicting evidence prevents localisation, it marks the earliest divergence as **unresolved**.
 
 ---
 
-## 6. Evidence & Attestation
+## Example: amount divergence
 
-Potential participants include:
+- Verified authorization establishes a ceiling of **₹9,500**.
+- Authenticated settlement evidence is **reliably linked** to that execution and records **₹12,000** settled.
 
-- Agent
-- Payment Service Provider
-- Bank
-- Merchant / Fulfilment system
-- Network / Assurance Coordinator
-- Investigator / Dispute Operations
+**Causent can report:** amount-constraint violation (`DIVERGENCE_CONFIRMED`), with localization `UNIQUE_EARLIEST` only if preceding dependencies support that uniqueness.
 
-The attestation flow is:
-
-```text
-Participant Event
-       |
-       v
-Canonical Event
-       |
-       v
-Hash
-       |
-       v
-Participant Signature
-       |
-       v
-Attestation
-       |
-       v
-Attestation Gateway
-```
-
-The gateway validates:
-
-- signature
-- participant identity
-- schema
-- execution binding
-- timestamp
-- replay protection
-
-Only validated observations enter the assurance pipeline.
+If settlement **cannot** be reliably linked to the authorization, Causent reports **insufficient or ambiguous evidence**—not a violation inferred from similar amounts or nearby timestamps.
 
 ---
 
-## 7. Execution Reconstruction
+## Drunix integration
 
-Participant events may arrive asynchronously and do not necessarily arrive in semantic execution order.
+Causent uses Drunix as the **shared governance and evidence-integrity layer** across independently operated participants. **Lite Peers** simulate and endorse transactions; **Committing Peers** validate and commit; the **stateless validation service** checks endorsement policies. Application-level assurance rules (e.g. payment-limit violations) remain in Causent’s processing layer.
 
-Ledgr therefore separates:
+| Drunix feature | Causent use |
+|----------------|-------------|
+| Lite / Committing peer separation | Scale endorsement vs commit as evidence submissions grow |
+| Stateless validation service | Enforce authorised transaction participation—not EBDL |
+| YugabyteDB state DB (target demo) | Ledger world state: case status, batch refs, assessment commitments |
+| KeyDB / private data | Transient/sensitive paths where configured; **not** permanent evidence archive |
+| Go chaincode | Case lifecycle and policy enforcement |
 
-```text
-Arrival Order
-```
+### Organisations (prototype network)
 
-from:
+| MSP | Role |
+|-----|------|
+| `AgentPlatformMSP` | Authority/delegation, task events, challenges |
+| `ServiceProviderMSP` | Invocation, delivery, provider attestations |
+| `PaymentParticipantMSP` | Authorization, settlement, failure, reversal (sandbox/simulated) |
 
-```text
-Execution Order
-```
+Submitting client identity, original evidence issuer, assurance-engine identity, and endorsing peers are **distinct** and preserved in records.
 
-Reconstruction performs:
+### Proposed chaincode operations (`causent-assurance`)
 
-```text
-CORRELATE
-    |
-    v
-NORMALIZE
-    |
-    v
-ORDER
-    |
-    v
-TRANSITION
-```
+| Operation | Purpose |
+|-----------|---------|
+| `OpenCase` | Initialise case and policy version |
+| `SubmitAttestation` | Participant evidence reference and digest |
+| `RegisterEvidenceBatch` | Canonical batch / Merkle root commitment |
+| `RecordAssessment` | Assurance report commitment |
+| `RaiseChallenge` | Challenge evidence or assessment (without target approval) |
+| `AppendCorrection` | Superseding/corrected evidence linked to prior record |
+| `SealCase` | Final reviewable case snapshot under governance policy |
 
-A conceptual execution state machine can contain:
+Case states (target): `OPEN` → `COLLECTING_EVIDENCE` → `ASSESSED` → `DISPUTED` → `RESOLVED` → `SEALED`.
 
-```text
-AUTHORIZED
-     |
-     v
-REQUESTED
-     |
-     v
-ACCEPTED
-     |
-     v
-PROCESSING
-     |
-     v
-FUNDS_DEBITED
-     |
-     v
-MERCHANT_CONFIRMED
-     |
-     v
-COMPLETED
-```
+Endorsement policies differ by action: participant evidence submission, independent challenges, multi-organisation approval for resolution/sealing. The prototype will test rejection of unauthorised submissions, impersonation, invalid transitions, and bypass of challenge or resolution procedures.
 
-The model can also represent legitimate rejection, cancellation, timeout, partial execution, and other branches.
+### Data placement
+
+| Store | Contents |
+|-------|----------|
+| Drunix ledger / YugabyteDB | Case state, digests, governance events |
+| Off-chain PostgreSQL | Event index, graph relationships, metadata |
+| Encrypted object store | Original evidence and full reports |
 
 ---
 
-## 8. Expected Execution Model
+## Prototype and validation
 
-Ledgr derives an expected execution model from the authorized mandate and applicable rules.
+### Demonstration scenarios (minimum)
 
-Conceptually:
+| Case | Expected behaviour |
+|------|-------------------|
+| **A — Consistent execution** | Authority, payment, and service evidence agree under rules → `CONSISTENT_WITH_EVIDENCE` |
+| **B — Confirmed amount divergence** | ₹9,500 ceiling vs ₹12,000 settled with reliable binding → `DIVERGENCE_CONFIRMED` |
+| **C — Insufficient evidence** | Similar amount/time but no trustworthy link → ambiguous / insufficient, not a definitive mispayment |
 
-```text
-E = (S, T, C, I)
-```
+Additional injected conditions: service-scope violations, missing links, delayed events, duplicate notifications, conflicting attestations, concurrent branches, invalid signatures.
 
-Where:
+### Evaluation methodology
 
-- `S` = valid states
-- `T` = valid transitions
-- `C` = constraints
-- `I` = invariants
+Begin with **30–60** synthetic multi-hop scenarios (expand if evaluation is stable). Each case is labelled for the **injected fault** and the **conclusion supportable from available evidence**—these differ when upstream evidence is missing.
 
-The expected model can represent constraints such as:
+**Baselines (same evidence, equivalent constraints where supported):**
 
-- Maximum amount
-- Allowed merchant
-- Allowed payment method
-- Execution validity
-- Required authorization
-- Required participant sequence
+- Manual investigation  
+- Flat event correlation  
+- Protocol-aware flat assurance (no multi-hop dependency propagation)  
+- Simpler dependency graph (weaker relation qualification / abstention)  
+- **Full Causent (EBDL + MLPG + governance)**
 
-Verification compares:
+**Assurance metrics:** divergence-localisation accuracy (unique cases), localisation coverage, relationship precision/recall, **unsupported definitive rate**, abstention quality, macro outcome F1.
 
-```text
-Observed Execution O
-        |
-        v
-     VERIFY
-        ^
-        |
-Expected Execution E
-```
+**Investigation effort:** median time to reproducible outcome, manual lookups, unsupported conclusions (Causent vs baseline, counterbalanced).
 
----
+**Drunix metrics:** policy enforcement, challenge independence, commitment integrity, latency/throughput vs a controlled central append-only comparator.
 
-## 9. Example: Amount Divergence
+### Provisional evaluation targets (goals—not achieved results)
 
-Suppose the authorized mandate specifies:
+- ≥ **10 percentage points** higher correct localisation vs strongest baseline on uniquely localisable cases  
+- ≥ **20%** lower median investigation time vs strongest baseline  
+- ≤ **5%** unsupported definitive conclusions (denominator: independently labelled evidence-supported outcomes)  
+- Reproducibility metadata on every assessment (evidence refs, rule versions, commitments)
 
-```text
-Maximum Amount = ₹15,000
-```
-
-Execution:
-
-```text
-Agent requests       ₹14,800
-PSP accepts          ₹14,800
-Bank debits          ₹16,200
-```
-
-The reconstructed execution becomes:
-
-```text
-AUTHORIZED
-     |
-     v
-REQUESTED ₹14,800
-     |
-     v
-ACCEPTED ₹14,800
-     |
-     v
-BANK_DEBITED ₹16,200
-```
-
-The first observable divergence is:
-
-```text
-BANK_DEBITED
-```
-
-because the observed amount violates the authorized maximum.
-
-The assurance record can contain:
-
-- authorized execution context
-- participant evidence
-- reconstructed execution
-- expected execution constraints
-- verification result
-- first divergence
-- evidence references
-- provenance information
-- integrity commitment
-- Drunix references
+Actual results, sample sizes, failures, and limitations will be reported honestly.
 
 ---
 
-## 10. Why Drunix
+## Repository layout
 
-Ledgr uses Drunix as a shared transactional state layer across participating organizations.
-
-Drunix is **not** intended to become a raw-log warehouse.
-
-It stores limited cross-organizational facts and commitments required for execution assurance.
-
-Examples include:
-
-- execution state
-- execution permits
-- attestation registration
-- state transitions
-- verification references
-- evidence commitments
-- assurance commitments
-
-Detailed business records and sensitive data remain in participant systems or private/off-chain storage where appropriate.
+Target structure (evolving with implementation):
 
 ```text
-Participant Systems
-       |
-       | Signed Observations
-       v
-Ledgr Assurance
-       |
-       +--------------------+
-       |                    |
-       v                    v
-Private / Off-chain     Drunix
-Evidence                Shared State
-       |                    |
-       +---------+----------+
-                 |
-                 v
-       Execution Assurance
-```
-
----
-
-## 11. Drunix Transaction Model
-
-The design includes explicit transactional operations:
-
-```text
-CreateExecution
-ConsumeExecutionPermit
-RegisterAttestation
-AdvanceExecutionState
-RecordVerification
-RecordDivergence
-CommitAssurance
-```
-
-The shared state is intentionally small and explicit.
-
-A key design objective is deterministic chaincode execution and protection against concurrent state changes.
-
-Duplicate execution attempts can result in competing transactions attempting to consume the same execution permit. Transaction validation and MVCC can expose the stale concurrent update.
-
----
-
-## 12. Execution Identity
-
-A single execution is bound to a stable execution identity.
-
-Conceptual identifiers include:
-
-```text
-execution_id
-intent_id
-mandate_id
-participant_id
-attestation_id
-event_id
-verification_id
-divergence_id
-record_id
-```
-
-Example:
-
-```text
-execution_id = EXE-7821
-intent_id    = INT-551
-mandate_id   = MAN-102
-agent_id     = AGENT-07
-```
-
-This binding helps prevent evidence or operations from being replayed against another execution.
-
----
-
-## 13. Provenance
-
-Every important assurance conclusion should be traceable to its supporting evidence.
-
-```text
-Participant Observation
-        |
-        v
-Attestation
-        |
-        v
-Reconstructed Event
-        |
-        v
-Verification Result
-        |
-        v
-Divergence
-        |
-        v
-Execution Assurance Record
-```
-
-The system should be able to answer:
-
-- Where did this observation come from?
-- Who signed it?
-- Which execution does it belong to?
-- Which verification result used it?
-- Why was a divergence identified?
-- Which evidence supports the conclusion?
-
----
-
-## 14. Execution Assurance Record
-
-The **Execution Assurance Record (EAR)** is the primary assurance output.
-
-It can contain:
-
-```text
-Execution Context
-        +
-Reconstructed Execution
-        +
-Expected Conditions
-        +
-Verification Result
-        +
-First Observable Divergence
-        +
-Evidence References
-        +
-Provenance
-        +
-Integrity Commitment
-        +
-Drunix References
-```
-
-The canonical EAR is hashed using SHA-256 before the assurance commitment is recorded.
-
-```text
-Canonical EAR
-     |
-     v
-  SHA-256
-     |
-     v
-assurance_hash
-     |
-     v
-CommitAssurance
-```
-
----
-
-## 15. Security Model
-
-### Cryptographic Integrity
-
-- participant signatures
-- cryptographic hashes
-- integrity commitments
-- key lifecycle considerations
-
-### Execution Binding
-
-Evidence is bound to:
-
-- execution identity
-- participant identity
-- operation
-- relevant context
-
-### Replay Protection
-
-The system checks for:
-
-- duplicate attestations
-- replayed operations
-- cross-execution replay
-
-### Drunix Transaction Security
-
-The design relies on:
-
-- authenticated transactions
-- endorsement
-- deterministic chaincode
-- ordering
-- validation
-- MVCC
-
-### Access Control
-
-The system applies:
-
-- role-based access control
-- least privilege
-- private data where required
-- selective disclosure
-- data minimization
-
----
-
-## 16. Failure & Threat Scenarios
-
-Ledgr is designed to evaluate:
-
-```text
-Amount Divergence
-Partial Execution
-Duplicate Retry
-Conflicting Observations
-Late Evidence
-Replay
-Cross-Execution Replay
-Tampered Evidence
-Invalid Transition
-Concurrent Execution
-```
-
-These scenarios can be represented separately for deterministic testing and benchmarking.
-
----
-
-## 17. Ecosystem Participants
-
-| Participant | Role |
-|---|---|
-| Network Operator / Assurance Coordinator | Coordinates execution assurance |
-| Agent Provider | Produces agent-side execution observations |
-| PSP | Provides payment processing observations |
-| Bank | Provides account/debit observations |
-| Merchant / Fulfilment | Provides fulfilment observations |
-| Investigator / Dispute Operations | Uses assurance records for reconstruction |
-| Regulator / Compliance | May consume appropriate assurance information |
-
-The detailed commercial model, buyer, pricing, and willingness-to-pay assumptions require validation rather than being treated as established facts.
-
----
-
-## 18. Technology Boundaries
-
-### Drunix / Chaincode
-
-Go is preferred for Drunix and chaincode components.
-
-### Assurance Services
-
-Python with FastAPI or an equivalent service framework can be used for:
-
-- attestation gateway
-- reconstruction
-- expected-state evaluation
-- verification
-- assurance API
-
-### Evidence
-
-Evidence can be divided between:
-
-```text
-Drunix Shared State
-        +
-Private / Off-chain Evidence
-```
-
-### Frontend
-
-A React-based dashboard can provide:
-
-- execution timeline
-- evidence view
-- verification status
-- divergence view
-- assurance record
-- provenance references
-
-### Cryptography
-
-Standard public-key cryptography and cryptographic hashing are used for participant signatures and integrity commitments.
-
-The exact implementation stack remains a prototype design choice.
-
----
-
-## 19. Conceptual API
-
-```text
-POST /executions
-POST /executions/{id}/permit
-POST /executions/{id}/attestations
-POST /executions/{id}/reconstruct
-POST /executions/{id}/verify
-
-GET /executions/{id}
-GET /executions/{id}/assurance
-GET /executions/{id}/evidence
-```
-
-Typical attestation flow:
-
-```text
-Canonical Event
-      |
-      v
-Sign Hash
-      |
-      v
-POST Attestation
-      |
-      v
-Verify Signature / Identity / Schema
-      |
-      v
-Verify Execution Binding / Replay
-      |
-      v
-RegisterAttestation
-      |
-      v
-Endorsement
-      |
-      v
-Ordering
-      |
-      v
-Validation / MVCC
-      |
-      v
-Commit
-```
-
----
-
-## 20. Duplicate Execution & MVCC
-
-A duplicate execution scenario can involve two concurrent attempts to consume the same execution permit.
-
-```text
-                 Execution Permit
-                       |
-              +--------+--------+
-              |                 |
-              v                 v
-          Attempt A         Attempt B
-              |                 |
-              v                 v
-          Valid Read         Valid Read
-              |                 |
-              v                 v
-           Commit          Stale State
-                                |
-                                v
-                           MVCC Conflict
-```
-
-Only the valid committed state transition should consume the permit.
-
-This scenario can be used to evaluate concurrent retry protection and MVCC correctness.
-
----
-
-## 21. Evaluation
-
-Ledgr should be evaluated using synthetic executions with known ground truth.
-
-The benchmark can generate:
-
-- signed participant events
-- authorized execution contexts
-- controlled failures
-- conflicting observations
-- replay attempts
-- concurrent operations
-- tampered evidence
-
-### Correctness Metrics
-
-- first-divergence accuracy
-- constraint-violation detection
-- conflict detection
-- missing-evidence handling
-- replay rejection
-- execution-binding validation
-- concurrent permit-consumption correctness
-
-### Performance Metrics
-
-- attestation verification latency
-- reconstruction latency
-- verification latency
-- Drunix commit latency
-- end-to-end assurance latency
-- throughput
-- p95 latency
-- p99 latency
-
-### Scale
-
-```text
-100 executions
-1,000 executions
-10,000 executions
-Larger synthetic datasets
-```
-
----
-
-## 22. Industry Impact Measures
-
-The system can be evaluated against operational outcomes such as:
-
-- dispute reconstruction time
-- first-divergence localization accuracy
-- evidence completeness
-- provenance completeness
-- duplicate execution attempts prevented
-- verification latency
-- Drunix commit latency
-- throughput
-- p95 latency
-- unresolved execution cases
-
----
-
-## 23. Reproducible Demo
-
-The minimum demonstration should execute one complete end-to-end scenario:
-
-```text
-1. Create mandate
-2. Create execution
-3. Consume execution permit
-4. Generate participant observations
-5. Submit signed attestations
-6. Register attestations
-7. Reconstruct execution
-8. Derive expected state
-9. Verify observed vs expected
-10. Identify first divergence
-11. Create Execution Assurance Record
-12. Commit assurance hash to Drunix
-13. Display evidence and execution timeline
-```
-
-### Example Mandate
-
-```text
-Book Bengaluru → Delhi
-Maximum Amount = ₹15,000
-```
-
-### Execution
-
-```text
-Agent Request = ₹14,800
-PSP Acceptance = ₹14,800
-Bank Debit = ₹16,200
-```
-
-### Expected Result
-
-```text
-First Observable Divergence = BANK_DEBITED
-Reason = AMOUNT_LIMIT violation
-```
-
----
-
-## 24. Repository Structure
-
-```text
-ledgr/
-│
+causent/
 ├── README.md
-│
 ├── docs/
 │   ├── architecture.md
 │   ├── data-model.md
 │   ├── drunix-design.md
 │   ├── threat-model.md
 │   └── evaluation.md
-│
-├── drunix/
-│   ├── network/
-│   └── chaincode/
-│
-├── execution/
+├── adapters/
+│   └── sandbox_payment/
+├── schemas/
+│   ├── canonical_event.schema.json
+│   └── assessment.schema.json
+├── evidence/
+│   ├── signature_verifier.py
+│   ├── source_registry.py
+│   └── replay_guard.py
+├── correlation/
+│   ├── relations.py
+│   └── partial_order.py
 ├── assurance/
-├── configs/
-├── scripts/
-│
-├── services/
-│   ├── attestation-gateway/
-│   ├── reconstruction/
-│   ├── expected-state/
-│   ├── verification/
-│   └── assurance-api/
-│
-├── participants/
-│   ├── agent-simulator/
-│   ├── psp-simulator/
-│   ├── bank-simulator/
-│   └── merchant-simulator/
-│
-├── frontend/
-├── benchmark/
-│
-└── scenarios/
-    ├── amount_divergence.json
-    ├── partial_execution.json
-    ├── duplicate_retry.json
-    └── conflicting_observations.json
+│   ├── rules.py
+│   ├── ebdl.py
+│   └── report.py
+├── storage/
+│   ├── evidence_store.py
+│   └── postgres_repository.py
+├── drunix/
+│   └── chaincode/
+│       └── causent-assurance/
+├── api/
+│   └── main.py
+├── simulator/
+│   ├── scenarios/
+│   └── fault_injection.py
+├── evaluation/
+│   ├── baselines/
+│   ├── metrics.py
+│   └── benchmark_runner.py
+└── tests/
+    ├── test_evidence.py
+    ├── test_assurance.py
+    ├── test_policies.py
+    └── test_end_to_end.py
 ```
+
+Assurance logic remains **independently testable** without entangling the Drunix client in core rule evaluation.
 
 ---
 
-## 25. Development Roadmap
+## Implementation roadmap
 
-### Phase 1 — Drunix Foundation
+| Phase | Focus | Acceptance gate |
+|-------|--------|-----------------|
+| **1 — Evidence & rules** | Canonical schema, sandbox adapter, registry, amount/authority rules, signed fixtures | Clean, excess-amount, invalid-signature, duplicate, ambiguous-link classifications |
+| **2 — EBDL & report** | MLPG, partial order, rules, localization, abstention, reproducible report | Unique / multi-candidate / unresolved localization tests pass repeatably |
+| **3 — Drunix** | Test network, `causent-assurance`, three orgs, case lifecycle, batch/assessment/challenge | Read committed state, verify commitment, reject ≥1 unauthorised operation |
+| **4 — Benchmark** | Demo cases A–C, baselines, ablations, Drunix performance | Published metrics with config, denominators, and known limits |
 
-Set up the official Drunix test network and establish the basic transaction flow.
-
-### Phase 2 — Minimal Chaincode
-
-Implement:
-
-```text
-CreateExecution
-ConsumeExecutionPermit
-RegisterAttestation
-AdvanceExecutionState
-```
-
-### Phase 3 — Participant Simulators
-
-Create simulated Agent, PSP, Bank, and Merchant participants capable of generating signed attestations.
-
-### Phase 4 — Deterministic Reconstruction
-
-Implement:
-
-```text
-Correlation
-Normalization
-Ordering
-State Reconstruction
-```
-
-### Phase 5 — Expected-State Engine
-
-Implement:
-
-```text
-Authorization Constraints
-Execution Rules
-State Transitions
-Invariants
-Policy Versioning
-```
-
-### Phase 6 — Verification
-
-Implement:
-
-```text
-Observed vs Expected
-Constraint Verification
-Transition Verification
-Conflict Detection
-First Observable Divergence
-```
-
-### Phase 7 — Assurance
-
-Create the Execution Assurance Record and commit its integrity reference to Drunix.
-
-### Phase 8 — Dashboard
-
-Expose execution timeline, evidence, verification, divergence, provenance, and assurance record.
-
-### Phase 9 — Benchmarking
-
-Evaluate correctness, security, concurrency, throughput, latency, and scalability.
+Implementation labels: `DESIGNED` → `IMPLEMENTED` → `TESTED` → `BENCHMARKED`. Planned work is not described as shipped functionality.
 
 ---
 
-## 26. Current Implementation Status
+## Documentation
 
-The repository is being developed incrementally.
-
-The documentation defines the target:
-
-- architecture
-- data model
-- Drunix interaction model
-- threat model
-- evaluation methodology
-- reproducible scenarios
-
-Implementation status should only be marked complete after the corresponding functionality exists and has been validated.
-
-The project distinguishes between:
-
-```text
-DESIGNED
-IMPLEMENTED
-TESTED
-BENCHMARKED
-```
-
-Planned components are not presented as completed functionality.
-
----
-
-## 27. Scope Boundaries
-
-Ledgr does **not**:
-
-- replace UAP authorization
-- establish identity or delegation
-- inspect private agent chain-of-thought
-- determine legal liability
-- replace participant systems
-- act as a raw-log warehouse
-- automatically treat missing evidence as proof of failure
-
-Ledgr focuses on:
-
-```text
-Execution Assurance
-Evidence
-Reconstruction
-Expected-State Verification
-Divergence Localization
-Provenance
-Shared Execution Commitments
-```
-
----
-
-## 28. Core Design Principle
-
-> **Do not merely record that a payment happened. Establish what was authorized, reconstruct what happened, determine what should have happened, identify where the execution first became inconsistent, and preserve the evidence required to support that conclusion.**
+| Document | Contents |
+|----------|----------|
+| [docs/architecture.md](docs/architecture.md) | Layering and component design (being aligned with Causent / EBDL) |
+| [docs/data-model.md](docs/data-model.md) | Canonical objects and events |
+| [docs/drunix-design.md](docs/drunix-design.md) | On-chain model, policies, chaincode |
+| [docs/threat-model.md](docs/threat-model.md) | Threats, mitigations, privacy boundaries |
+| [docs/evaluation.md](docs/evaluation.md) | Benchmarks, metrics, baselines |
 
 ---
 
 ## Status
 
-**Project:** Ledgr  
-**Domain:** Agentic Payment Execution Assurance  
-**Architecture:** Eight-layer execution-assurance architecture  
-**Shared State Layer:** Drunix  
-**Implementation:** In progress  
-**Primary Focus:** Execution reconstruction, verification, divergence localization, provenance, and assurance
+| | |
+|--|--|
+| **Project** | Causent — Beyond the Receipt |
+| **Domain** | Evidence-bounded execution assurance for agentic payments |
+| **Core method** | EBDL + Multi-Layer Provenance Graph (MLPG) |
+| **Governance** | Drunix (Go chaincode, multi-org prototype) |
+| **Implementation** | Documentation and target design in progress; application and chaincode to follow roadmap |
+
+---
+
+## Core design principle
+
+> **Do not stop at the receipt.** Correlate what participants actually attested, verify explicit constraints against recorded intent and authority, localise only the earliest divergence the evidence supports, say clearly when the evidence cannot support more—and preserve an auditable, cross-organisation record of that investigation.
